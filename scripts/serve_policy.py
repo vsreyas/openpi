@@ -70,9 +70,10 @@ DEFAULT_CHECKPOINT: dict[EnvMode, Checkpoint] = {
         dir="gs://openpi-assets/checkpoints/pi05_droid",
     ),
     EnvMode.LIBERO: Checkpoint(
-        config="pi05_libero",
+        config="pi05_libero_finetuned",
         dir="gs://openpi-assets/checkpoints/pi05_libero",
     ),
+    # Note: These defaults should be updated as and when new checkpoints are trained. All experiments must be on onboarded here.
 }
 
 

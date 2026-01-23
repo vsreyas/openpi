@@ -968,6 +968,76 @@ _CONFIGS = [
     # RoboArena & PolaRiS configs.
     *roboarena_config.get_roboarena_configs(),
     *polaris_config.get_polaris_configs(),
+    TrainConfig(
+        name="pi05_libero_finetuned",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_libero/params"), # gs://openpi-assets/checkpoints/pi05_base/params /data/hf_cache/models/ep5_chkpt/params
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_libero_finetuned_two_moka_pots",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/hf_cache/models/clean_pi05_libero_29episodes_chkpt500/params"), # gs://openpi-assets/checkpoints/pi05_base/params /data/hf_cache/models/ep5_chkpt/params
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        # Change the name to reflect your model and dataset.
+        name="pi0_libero_finetuned",
+        # Here you define the model config -- In this example we use pi0 as the model
+        # architecture and perform *full* finetuning. in the examples below we show how to modify
+        # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        model=pi0_config.Pi0Config(),
+        # Here you define the dataset you are training on. In this example we use the Libero
+        # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+        # Also modify the DataConfig to use the new config you made for your dataset above.
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(
+                # This flag determines whether we load the prompt (i.e. the task instruction) from the
+                # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
+                # a field called ``prompt`` in the input dict. The recommended setting is True.
+                prompt_from_task=True,
+            ),
+            extra_delta_transform=True,
+        ),
+        # Here you define which pre-trained checkpoint you want to load to initialize the model.
+        # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi0_libero/params"),
+        # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+        # Check the base TrainConfig class for a full list of available hyperparameters.
+        num_train_steps=30_000,
+    ),
+
 ]
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
