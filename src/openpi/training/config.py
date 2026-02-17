@@ -1006,7 +1006,7 @@ _CONFIGS = [
         ),
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/hf_cache/models/clean_pi05_libero_29episodes_chkpt500/params"), # gs://openpi-assets/checkpoints/pi05_base/params /data/hf_cache/models/ep5_chkpt/params
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/hf_cache/models/pi05_libero_ep5_mokapots_4k/params"), # gs://openpi-assets/checkpoints/pi05_base/params /data/hf_cache/models/ep5_chkpt/params
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=30_000,
     ),

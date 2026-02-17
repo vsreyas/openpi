@@ -277,6 +277,7 @@ class BaseModel(nnx.Module, abc.ABC):
         actions: Actions,
         *,
         train: bool = False,
+        return_vlm_embedding: bool = False,
     ) -> at.Float[at.Array, "*b ah"]: ...
 
     @abc.abstractmethod
