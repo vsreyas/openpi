@@ -1,6 +1,8 @@
 """See _CONFIGS for the list of available configs."""
 
 import abc
+import json
+import os
 from collections.abc import Sequence
 import dataclasses
 import difflib
@@ -20,6 +22,7 @@ import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
+import openpi.policies.robocasa_policy as robocasa_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -28,6 +31,11 @@ import openpi.training.misc.roboarena_config as roboarena_config
 import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
 import openpi.transforms as _transforms
+import numpy as np
+
+import openpi.groot_utils.groot_openpi_dataset as _groot_openpi_dataset
+from robocasa.macros import DATASET_BASE_PATH
+from robocasa.utils.dataset_registry import DATASET_SOUP_REGISTRY
 
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
@@ -96,6 +104,13 @@ class DataConfig:
     action_space: droid_rlds_dataset.DroidActionSpace | None = None
     # List of datasets to sample from: name, version, weight, and optionally filter_dict_path
     datasets: Sequence[droid_rlds_dataset.RLDSDataset] = ()
+
+    # Action dimension for padding (used by Groot datasets)
+    action_dim: int | None = None
+    
+    # Multi-dataset support for Groot datasets
+    data_dirs: list[str] | None = None  # List of data directories for multi-dataset
+    dataset_weights: list[float] | None = None  # Weights for each dataset in multi-dataset
 
 
 class GroupFactory(Protocol):
@@ -459,6 +474,73 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+        )
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotRobocasaDataConfig(DataConfigFactory):
+    """Config for training on Groot datasets."""
+
+    repo_id: str | None = None
+
+    data_dirs: Any | None = None
+    dataset_weights: list[float] | None = None
+
+    action_dim: int | None = None
+
+    # Scene filtering: restrict to specific (layout_id, style_id) pairs
+    layout_and_style_ids: list[tuple[int, int]] | None = None
+    # Number of demos to use after scene filtering
+    num_demos: int | None = None
+    
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group()
+
+        data_transforms = _transforms.Group(
+            inputs=[robocasa_policy.RobocasaInputs(action_dim=model_config.action_dim, model_type=model_config.model_type)],
+            outputs=[robocasa_policy.RobocasaOutputs()],
+        )
+
+        model_transforms = ModelTransformFactory()(model_config)
+
+        base = self.create_base_config(assets_dirs, model_config)
+
+        # Enrich data_dirs with scene filtering params
+        enriched_data_dirs = self.data_dirs
+        if self.data_dirs and (self.layout_and_style_ids is not None or self.num_demos is not None):
+            enriched_data_dirs = []
+            for d in self.data_dirs:
+                d_copy = dict(d)
+                if self.layout_and_style_ids is not None:
+                    d_copy["layout_and_style_ids"] = self.layout_and_style_ids
+                if self.num_demos is not None:
+                    d_copy["num_demos"] = self.num_demos
+                enriched_data_dirs.append(d_copy)
+
+        # Fallback: if norm_stats not found via assets/repo meta, combine from all data_dirs
+        fallback_norm_stats = None
+        if base.norm_stats is None and self.data_dirs and len(self.data_dirs) > 0:
+            if len(self.data_dirs) == 1:
+                d = self.data_dirs[0]
+                norm_stats = _groot_openpi_dataset._load_norm_stats_from_groot_dataset(d)
+                if norm_stats is not None:
+                    fallback_norm_stats = norm_stats
+                    logging.info(f"Loaded norm stats from local data dir: {d}")
+            else:
+                norm_stats = _groot_openpi_dataset._load_norm_stats_from_groot_mixture_dataset(self.data_dirs)
+                if norm_stats is not None:
+                    fallback_norm_stats = norm_stats
+                    logging.info(f"Loaded combined norm stats from {len(self.data_dirs)} data dirs")
+
+        return dataclasses.replace(
+            base,
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_dim=model_config.action_dim,
+            data_dirs=enriched_data_dirs,
+            dataset_weights=self.dataset_weights,
+            norm_stats=base.norm_stats or fallback_norm_stats,
         )
 
 
@@ -1036,6 +1118,54 @@ _CONFIGS = [
         # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
         # Check the base TrainConfig class for a full list of available hyperparameters.
         num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_robocasa_rlds_multitask",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10),
+        data=LeRobotRobocasaDataConfig(
+            assets=AssetsConfig(
+                assets_dir="/data/user_data/sreyasv/Repos/batch_value_learning/assets/pi05_robocasa_rlds_comp_set",
+                asset_id="robocasa",
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        checkpoint_base_dir="/data/hf_cache/pi-models/pi05_robocasa/",
+        num_train_steps=100_000,
+        batch_size=32,
+        save_interval=2_000,
+        num_workers=4,
+        log_interval=100,
+    ),
+    TrainConfig(
+        name="pi05_robocasa_single_task_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            paligemma_variant="gemma_2b_lora",
+        ),
+        data=LeRobotRobocasaDataConfig(
+            assets=AssetsConfig(
+                assets_dir="/data/user_data/sreyasv/Repos/batch_value_learning/assets/pi05_robocasa_rlds_comp_set",
+                asset_id="robocasa",
+            ),
+            data_dirs=[{
+                "path": "/data/hf_cache/datasets/robocasa/v1.0/target/atomic/PickPlaceCounterToCabinet/20250811/lerobot",
+                "filter_key": None,
+            }],
+            layout_and_style_ids=[(1, 1)],
+            num_demos=40,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        checkpoint_base_dir="/data/hf_cache/pi-models/pi05_robocasa_single_task/",
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=100_000,
+        batch_size=32,
+        save_interval=2_000,
+        num_workers=4,
+        log_interval=100,
     ),
 
 ]

@@ -8,6 +8,7 @@ from typing import Literal, Protocol, SupportsIndex, TypeVar
 import jax
 import jax.numpy as jnp
 # import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+import openpi.groot_utils.groot_openpi_dataset as _groot_openpi_dataset
 import numpy as np
 import torch
 
@@ -132,10 +133,32 @@ def create_torch_dataset(
 ) -> Dataset:
     """Create a dataset for training."""
     repo_id = data_config.repo_id
-    if repo_id is None:
-        raise ValueError("Repo ID is not set. Cannot create dataset.")
+    
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
+    
+    if getattr(data_config, "data_dirs", None):
+        data_dirs = data_config.data_dirs
+        if len(data_dirs) == 1:
+            return _groot_openpi_dataset.GrootOpenpiSingleDataset(
+                dataset_meta=data_dirs[0],
+                action_horizon=action_horizon,
+            )
+        elif len(data_dirs) > 1:
+            return _groot_openpi_dataset.GrootOpenpiMultiDataset(
+                dataset_meta_list=data_dirs,
+                dataset_weights=getattr(data_config, "dataset_weights", None),
+                dataset_weights_alpha=0.4,
+                action_horizon=action_horizon,
+            )
+        else:
+            raise ValueError
+    
+    if repo_id is None:
+        raise ValueError("Repo ID is not set. Cannot create dataset.")
+
+    # Standard (openpi) LeRobot dataset loading
+    import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
 
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
     dataset = lerobot_dataset.LeRobotDataset(
