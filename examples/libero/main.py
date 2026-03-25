@@ -38,6 +38,12 @@ class Args:
     num_trials_per_task: int = 50  # Number of rollouts per task
 
     #################################################################################################################
+    # Waypoint image conditioning
+    #################################################################################################################
+    use_waypoint_image: bool = False  # If True, include a waypoint image in observations
+    waypoint_image_path: str = ""  # Path to the waypoint image file (required when use_waypoint_image=True)
+
+    #################################################################################################################
     # Utils
     #################################################################################################################
     video_out_path: str = "data/libero/videos"  # Path to save videos
@@ -72,6 +78,16 @@ def eval_libero(args: Args) -> None:
 
     client = _websocket_client_policy.WebsocketClientPolicy(args.host, args.port)
 
+    # Load waypoint image if specified
+    waypoint_img = None
+    if args.use_waypoint_image:
+        if not args.waypoint_image_path:
+            raise ValueError("--waypoint_image_path is required when --use_waypoint_image is True")
+        waypoint_img = imageio.imread(args.waypoint_image_path)
+        waypoint_img = image_tools.convert_to_uint8(
+            image_tools.resize_with_pad(waypoint_img, args.resize_size, args.resize_size)
+        )
+
     # Start evaluation
     total_episodes, total_successes = 0, 0
     for task_id in tqdm.tqdm(range(num_tasks_in_suite)):
@@ -100,7 +116,7 @@ def eval_libero(args: Args) -> None:
             t = 0
             replay_images = []
 
-            logging.info(f"Starting episode {task_episodes+1}...")
+            logging.info(f"Starting episode {task_episodes + 1}...")
             while t < max_steps + args.num_steps_wait:
                 try:
                     # IMPORTANT: Do nothing for the first few timesteps because the simulator drops objects
@@ -139,12 +155,14 @@ def eval_libero(args: Args) -> None:
                             ),
                             "prompt": str(task_description),
                         }
+                        if args.use_waypoint_image:
+                            element["observation/waypoint_image"] = waypoint_img
 
                         # Query model to get action
                         action_chunk = client.infer(element)["actions"]
-                        assert (
-                            len(action_chunk) >= args.replan_steps
-                        ), f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
+                        assert len(action_chunk) >= args.replan_steps, (
+                            f"We want to replan every {args.replan_steps} steps, but policy only predicts {len(action_chunk)} steps."
+                        )
                         action_plan.extend(action_chunk[: args.replan_steps])
 
                     action = action_plan.popleft()

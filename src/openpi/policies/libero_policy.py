@@ -7,14 +7,17 @@ from openpi import transforms
 from openpi.models import model as _model
 
 
-def make_libero_example() -> dict:
+def make_libero_example(*, include_waypoint_image: bool = False) -> dict:
     """Creates a random input example for the Libero policy."""
-    return {
+    example = {
         "observation/state": np.random.rand(8),
         "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "prompt": "do something",
     }
+    if include_waypoint_image:
+        example["observation/waypoint_image"] = np.random.randint(256, size=(224, 224, 3), dtype=np.uint8)
+    return example
 
 
 def _parse_image(image) -> np.ndarray:
@@ -38,6 +41,8 @@ class LiberoInputs(transforms.DataTransformFn):
     # Determines which model will be used.
     # Do not change this for your own dataset.
     model_type: _model.ModelType
+    # When True, expects an additional "observation/waypoint_image" input.
+    include_waypoint_image: bool = False
 
     def __call__(self, data: dict) -> dict:
         # Possibly need to parse images to uint8 (H,W,C) since LeRobot automatically
@@ -68,6 +73,13 @@ class LiberoInputs(transforms.DataTransformFn):
                 "right_wrist_0_rgb": np.True_ if self.model_type == _model.ModelType.PI0_FAST else np.False_,
             },
         }
+
+        if self.include_waypoint_image:
+            if "observation/waypoint_image" not in data:
+                raise ValueError("observation/waypoint_image is required when include_waypoint_image=True")
+            waypoint_image = _parse_image(data["observation/waypoint_image"])
+            inputs["image"]["waypoint_image"] = waypoint_image
+            inputs["image_mask"]["waypoint_image"] = np.True_
 
         # Pad actions to the model action dimension. Keep this for your own dataset.
         # Actions are only available during training.

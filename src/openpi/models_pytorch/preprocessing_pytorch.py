@@ -49,7 +49,7 @@ def preprocess_observation_pytorch(
             logger.info(f"Resizing image {key} from {image.shape[1:3]} to {image_resolution}")
             image = image_tools.resize_with_pad_torch(image, *image_resolution)
 
-        if train:
+        if train and "waypoint" not in key:
             # Convert from [-1, 1] to [0, 1] for PyTorch augmentations
             image = image / 2.0 + 0.5
 

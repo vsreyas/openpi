@@ -89,6 +89,8 @@ class DataConfig:
 
     # If true, will use the LeRobot dataset task to define the prompt.
     prompt_from_task: bool = False
+    # Tolerance in seconds for timestamp validation in LeRobot datasets.
+    tolerance_s: float = 1e-4
 
     # Only used for RLDS data loader (ie currently only used for DROID).
     rlds_data_dir: str | None = None
@@ -287,6 +289,8 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
     """
 
     extra_delta_transform: bool = False
+    include_waypoint_image: bool = False
+    tolerance_s: float = 1e-4
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -298,19 +302,16 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         # For your own dataset, first figure out what keys your environment passes to the policy server
         # and then modify the mappings below so your dataset's keys get matched to those target keys.
         # The repack transform simply remaps key names here.
-        repack_transform = _transforms.Group(
-            inputs=[
-                _transforms.RepackTransform(
-                    {
-                        "observation/image": "image",
-                        "observation/wrist_image": "wrist_image",
-                        "observation/state": "state",
-                        "actions": "actions",
-                        "prompt": "prompt",
-                    }
-                )
-            ]
-        )
+        repack_keys = {
+            "observation/image": "image",
+            "observation/wrist_image": "wrist_image",
+            "observation/state": "state",
+            "actions": "actions",
+            "prompt": "prompt",
+        }
+        if self.include_waypoint_image:
+            repack_keys["observation/waypoint_image"] = "waypoint_image"
+        repack_transform = _transforms.Group(inputs=[_transforms.RepackTransform(repack_keys)])
 
         # The data transforms are applied to the data coming from the dataset *and* during inference.
         # Below, we define the transforms for data going into the model (``inputs``) and the transforms
@@ -319,7 +320,12 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
         # how to modify the transforms to match your dataset. Once you created your own transforms, you can
         # replace the transforms below with your own.
         data_transforms = _transforms.Group(
-            inputs=[libero_policy.LiberoInputs(model_type=model_config.model_type)],
+            inputs=[
+                libero_policy.LiberoInputs(
+                    model_type=model_config.model_type,
+                    include_waypoint_image=self.include_waypoint_image,
+                )
+            ],
             outputs=[libero_policy.LiberoOutputs()],
         )
 
@@ -352,6 +358,7 @@ class LeRobotLiberoDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+            tolerance_s=self.tolerance_s,
         )
 
 
@@ -742,11 +749,18 @@ _CONFIGS = [
     ),
     TrainConfig(
         name="pi05_libero",
-        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            discrete_state_input=False,
+            image_keys=("base_0_rgb", "left_wrist_0_rgb", "right_wrist_0_rgb", "waypoint_image"),
+        ),
         data=LeRobotLiberoDataConfig(
             repo_id="physical-intelligence/libero",
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=False,
+            include_waypoint_image=True,
+            tolerance_s=100.0,
         ),
         batch_size=256,
         lr_schedule=_optimizer.CosineDecaySchedule(
