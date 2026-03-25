@@ -26,33 +26,88 @@ from robocasa.utils.groot_utils.groot_dataset import LeRobotSingleDataset, LeRob
 from robocasa.utils.groot_utils.embodiment_tags import EmbodimentTag
 
 
+def _fixture_refs_match(ep_refs: dict, requested: dict) -> bool:
+    """Check that every (key, value) in requested matches the episode's fixture_refs."""
+    for key, value in requested.items():
+        if ep_refs.get(key) != value:
+            return False
+    return True
+
+
+def _object_cat_match(obj_cfgs: list, allowed_cats: list) -> bool:
+    """Check that the episode's main object category is in the allowed list."""
+    if not obj_cfgs:
+        return False
+    main_cat = obj_cfgs[0].get("info", {}).get("cat")
+    return main_cat in allowed_cats
+
+
+def load_ep_meta(dataset_path: pathlib.Path, episode_idx: int) -> dict:
+    """Load ep_meta.json for a given episode index."""
+    meta_path = dataset_path / "extras" / f"episode_{episode_idx:06d}" / "ep_meta.json"
+    with open(meta_path) as f:
+        return json.load(f)
+
+
 def get_scene_filtered_demos(
     dataset_path: pathlib.Path,
     layout_and_style_ids: list[tuple[int, int]],
     num_demos: int | None = None,
+    fixture_refs: dict[str, str] | None = None,
+    object_categories: list[str] | None = None,
+    episode_ids: list[int] | None = None,
 ) -> list[int]:
-    """Filter episodes by (layout_id, style_id) pairs, then optionally take first N."""
+    """Filter episodes by scene metadata, then optionally take first N.
+
+    Filters are applied in order:
+    1. (layout_id, style_id) pair membership
+    2. fixture_refs subset match
+    3. main object category membership
+    4. explicit episode_ids allowlist intersection
+    5. num_demos truncation
+    """
     episodes_path = dataset_path / "meta" / "episodes.jsonl"
     with open(episodes_path) as f:
         episodes = [json.loads(line) for line in f]
 
-    allowed = set(map(tuple, layout_and_style_ids))
+    allowed_scenes = set(map(tuple, layout_and_style_ids))
+    allowed_ids = set(episode_ids) if episode_ids is not None else None
+
     filtered = []
     for ep in episodes:
         idx = ep["episode_index"]
-        meta_path = dataset_path / "extras" / f"episode_{idx:06d}" / "ep_meta.json"
-        with open(meta_path) as f:
-            meta = json.load(f)
-        if (meta["layout_id"], meta["style_id"]) in allowed:
-            filtered.append(idx)
+
+        # Episode ID allowlist (fast check, skip metadata load)
+        if allowed_ids is not None and idx not in allowed_ids:
+            continue
+
+        meta = load_ep_meta(dataset_path, idx)
+
+        # Layout/style filter
+        if (meta["layout_id"], meta["style_id"]) not in allowed_scenes:
+            continue
+
+        # Fixture refs filter
+        if fixture_refs is not None:
+            if not _fixture_refs_match(meta.get("fixture_refs", {}), fixture_refs):
+                continue
+
+        # Object category filter
+        if object_categories is not None:
+            if not _object_cat_match(meta.get("object_cfgs", []), object_categories):
+                continue
+
+        filtered.append(idx)
 
     filtered.sort()
 
     if not filtered:
         raise ValueError(
-            f"No episodes match layout_and_style_ids={layout_and_style_ids} "
-            f"in dataset at {dataset_path}. Check that the requested (layout_id, style_id) "
-            f"pairs exist in the per-episode ep_meta.json files."
+            f"No episodes match filters in dataset at {dataset_path}. "
+            f"layout_and_style_ids={layout_and_style_ids}, "
+            f"fixture_refs={fixture_refs}, "
+            f"object_categories={object_categories}, "
+            f"episode_ids={episode_ids}"
         )
 
     if num_demos is not None and num_demos < len(filtered):
@@ -117,12 +172,17 @@ class GrootOpenpiSingleDataset(LeRobotSingleDataset):
             ),
         }
 
-        # Scene filtering: restrict to specific (layout_id, style_id) pairs
+        # Scene filtering: restrict by layout/style, fixture refs, object categories, episode IDs
         layout_and_style_ids = dataset_meta.get("layout_and_style_ids")
         num_demos = dataset_meta.get("num_demos")
         subset_demos = None
         if layout_and_style_ids is not None:
-            subset_demos = get_scene_filtered_demos(dataset_path, layout_and_style_ids, num_demos)
+            subset_demos = get_scene_filtered_demos(
+                dataset_path, layout_and_style_ids, num_demos,
+                fixture_refs=dataset_meta.get("fixture_refs"),
+                object_categories=dataset_meta.get("object_categories"),
+                episode_ids=dataset_meta.get("episode_ids"),
+            )
 
         super().__init__(
             dataset_path=dataset_path,
@@ -212,7 +272,12 @@ class GrootOpenpiMultiDataset(LeRobotMixtureDataset):
             num_demos_val = ds_meta.get("num_demos")
             subset_demos = None
             if layout_and_style_ids is not None:
-                subset_demos = get_scene_filtered_demos(ds_path, layout_and_style_ids, num_demos_val)
+                subset_demos = get_scene_filtered_demos(
+                    ds_path, layout_and_style_ids, num_demos_val,
+                    fixture_refs=ds_meta.get("fixture_refs"),
+                    object_categories=ds_meta.get("object_categories"),
+                    episode_ids=ds_meta.get("episode_ids"),
+                )
 
             this_dataset = LeRobotSingleDataset(
                 dataset_path=ds_path,

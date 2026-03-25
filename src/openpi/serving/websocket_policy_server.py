@@ -64,7 +64,7 @@ class WebsocketPolicyServer:
                 infer_time = time.monotonic()
                 if method == "infer":
                     noise = obs.pop("noise", None)
-                    result = self._policy.infer(obs, noise)
+                    result = self._policy.infer(obs, noise=noise)
                 elif method == "get_prefix_rep":
                     result = self._policy.get_prefix_rep(obs)
                 else:

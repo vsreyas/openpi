@@ -34,6 +34,26 @@ class Args:
     split: str = "pretrain"
     num_trials: int = 50  # Number of rollouts per task
     task_set: list = None
+    # Direct env name (bypasses task_set registry lookup)
+    env_name: str | None = None
+    # Scene restriction: list of (layout_id, style_id) tuples
+    layout_and_style_ids: list[tuple[int, int]] | None = None
+
+    # Eval initialization mode
+    eval_init_mode: str | None = None  # "exact_state_replay" | "fixture_pair_fresh_placement" | "fixture_pair_object_pool"
+    dataset_path: str | None = None  # required for eval modes (to load states.npz / ep_meta)
+    eval_pool_episode_ids: list[int] | None = None
+    eval_pool_fixture_refs: dict[str, str] | None = None
+    eval_pool_object_categories: list[str] | None = None
+    eval_keep_robot_pose: bool = False
+    # Additive uniform noise on robot base pos (xy) and yaw; 0 = exact
+    eval_robot_pose_noise: float = 0.0
+    # Additive uniform noise on main object XY position; 0 = exact
+    eval_object_pose_noise: float = 0.0
+    # Additive uniform noise on main object yaw (radians); 0 = exact
+    eval_object_ori_noise: float = 0.0
+    # If True, disable the gripper-must-be-far-from-object success requirement
+    skip_gripper_far_check: bool = False
 
     #################################################################################################################
     # Utils
@@ -46,7 +66,12 @@ class Args:
 def eval_main(args: Args) -> None:
     # Set random seed
     np.random.seed(args.seed)
-    
+
+    if args.skip_gripper_far_check:
+        import robocasa.utils.object_utils as OU
+        OU.gripper_obj_far = lambda *args, **kwargs: True
+        logging.info("Patched gripper_obj_far to always return True")
+
     split = args.split
     log_dir = args.log_dir
     num_trials = args.num_trials
@@ -55,19 +80,33 @@ def eval_main(args: Args) -> None:
     host = args.host
     port = args.port
 
-    all_env_names = []
-    for task in args.task_set:
-        env_names = TASK_SET_REGISTRY[task]
-        all_env_names.extend(env_names)
+    if args.env_name is not None:
+        all_env_names = [args.env_name]
+    else:
+        all_env_names = []
+        for task in args.task_set:
+            env_names = TASK_SET_REGISTRY[task]
+            all_env_names.extend(env_names)
 
     for env_name in all_env_names:
-        # try:
-        eval_env(env_name, split, log_dir, num_trials, resize_size, replan_steps, host, port, args.seed)
-        # except Exception as e:
-        #     print("Exception!")
-        #     print(e)
+        eval_env(env_name, split, log_dir, num_trials, resize_size, replan_steps, host, port, args.seed,
+                 layout_and_style_ids=args.layout_and_style_ids,
+                 eval_init_mode=args.eval_init_mode,
+                 dataset_path=args.dataset_path,
+                 eval_pool_episode_ids=args.eval_pool_episode_ids,
+                 eval_pool_fixture_refs=args.eval_pool_fixture_refs,
+                 eval_pool_object_categories=args.eval_pool_object_categories,
+                 eval_keep_robot_pose=args.eval_keep_robot_pose,
+                 eval_robot_pose_noise=args.eval_robot_pose_noise,
+                 eval_object_pose_noise=args.eval_object_pose_noise,
+                 eval_object_ori_noise=args.eval_object_ori_noise)
 
-def eval_env(env_name, split, log_dir, num_trials, resize_size, replan_steps, host, port, seed):
+def eval_env(env_name, split, log_dir, num_trials, resize_size, replan_steps, host, port, seed,
+             layout_and_style_ids=None, eval_init_mode=None, dataset_path=None,
+             eval_pool_episode_ids=None, eval_pool_fixture_refs=None,
+             eval_pool_object_categories=None, eval_keep_robot_pose=False,
+             eval_robot_pose_noise=0.0, eval_object_pose_noise=0.0,
+             eval_object_ori_noise=0.0):
     # set args based on task
     assert split in ["pretrain", "target"]
     task_horizon = get_task_horizon(env_name)
@@ -91,7 +130,39 @@ def eval_env(env_name, split, log_dir, num_trials, resize_size, replan_steps, ho
     # Start evaluation
     total_episodes, total_successes = 0, 0
     # Get task
-    env = gym.make(f"robocasa/{env_name}", split=split, seed=seed)
+    env_kwargs = {"seed": seed}
+    if layout_and_style_ids is not None:
+        env_kwargs["split"] = None
+        env_kwargs["layout_and_style_ids"] = layout_and_style_ids
+    else:
+        env_kwargs["split"] = split
+
+    # Construct eval reset controller if eval_init_mode is configured
+    if eval_init_mode is not None:
+        # Import from dsrl_pi0 project root (cwd when this script is run)
+        import sys
+        dsrl_root = os.environ.get("DSRL_PI0_ROOT", os.getcwd())
+        if dsrl_root not in sys.path:
+            sys.path.insert(0, dsrl_root)
+        from examples.robocasa_eval_reset import RoboCasaEvalResetController
+        if dataset_path is None:
+            raise ValueError("--dataset-path is required when using --eval-init-mode")
+        eval_controller = RoboCasaEvalResetController(
+            dataset_path=pathlib.Path(dataset_path),
+            eval_init_mode=eval_init_mode,
+            layout_and_style_ids=layout_and_style_ids,
+            eval_pool_episode_ids=eval_pool_episode_ids,
+            eval_pool_fixture_refs=eval_pool_fixture_refs,
+            eval_pool_object_categories=eval_pool_object_categories,
+            keep_robot_pose=eval_keep_robot_pose,
+            robot_pose_noise=eval_robot_pose_noise,
+            object_pose_noise=eval_object_pose_noise,
+            object_ori_noise=eval_object_ori_noise,
+            rng_seed=seed,
+        )
+        env_kwargs["eval_reset_controller"] = eval_controller
+
+    env = gym.make(f"robocasa/{env_name}", **env_kwargs)
     # Start episodes
     task_episodes, task_successes = 0, 0
     for episode_idx in tqdm.tqdm(range(num_trials)):
@@ -176,6 +247,19 @@ def eval_env(env_name, split, log_dir, num_trials, resize_size, replan_steps, ho
             [np.asarray(x) for x in replay_images],
             fps=20,
         )
+
+        # Copy oracle (recorded demo) video from dataset if available
+        if eval_init_mode is not None and "eval_reset_controller" in env_kwargs:
+            ctrl = env_kwargs["eval_reset_controller"]
+            reset_info = ctrl.last_reset_info
+            if reset_info is not None:
+                import shutil
+                ep_id = reset_info["episode_id"]
+                ds_path = pathlib.Path(dataset_path)
+                oracle_src = ds_path / "videos" / "chunk-000" / "observation.images.robot0_agentview_left" / f"episode_{ep_id:06d}.mp4"
+                if oracle_src.exists():
+                    oracle_dst = pathlib.Path(log_path) / f"oracle_{episode_idx}_ep{ep_id}.mp4"
+                    shutil.copy2(oracle_src, oracle_dst)
 
         # Log current results
         logging.info(f"Success: {done}")

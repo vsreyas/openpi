@@ -8,6 +8,7 @@
 #SBATCH --partition=general
 #SBATCH --qos=normal
 #SBATCH --constraint=L40S
+#SBATCH --exclude=babel-p5-28
 #SBATCH --output=/data/user_data/sreyasv/robocasa_logs/logs/pi05_single_task_%j.out
 #SBATCH --error=/data/user_data/sreyasv/robocasa_logs/logs/pi05_single_task_%j.err
 
@@ -21,18 +22,18 @@
 #   NUM_DEMOS=10 sbatch slurm_robocasa_single_task.sh # override demo count
 # =============================================================================
 
-NUM_DEMOS=${NUM_DEMOS:-3}
+NUM_DEMOS=${NUM_DEMOS:-5}
 
 export OPENPI_DATA_HOME=/data/hf_cache/pi-models/openpi
-export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
+export PYTHONUNBUFFERED=1
 
 cd /home/sreyasv/Projects/dsrl_pi0/openpi
 source /home/sreyasv/miniconda3/etc/profile.d/conda.sh
 conda activate dsrl_pi0
 echo "Starting single-task training: PickPlaceCounterToCabinet, layout=1 style=1, num_demos=${NUM_DEMOS}"
 
-conda run -n dsrl_pi0 python scripts/train.py pi05_robocasa_single_task_lora \
+python scripts/train.py pi05_robocasa_single_task_lora \
     --exp-name=pi05_pickplace_cab_L1S1_${NUM_DEMOS}demos \
     --batch-size 32 \
     --data.num-demos ${NUM_DEMOS} \

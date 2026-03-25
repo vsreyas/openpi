@@ -491,7 +491,26 @@ class LeRobotRobocasaDataConfig(DataConfigFactory):
     layout_and_style_ids: list[tuple[int, int]] | None = None
     # Number of demos to use after scene filtering
     num_demos: int | None = None
-    
+
+    # Extended training demo filtering
+    fixture_refs: dict[str, str] | None = None
+    object_categories: list[str] | None = None
+    episode_ids: list[int] | None = None
+
+    # Eval initialization mode
+    eval_init_mode: str | None = None  # "exact_state_replay" | "fixture_pair_fresh_placement" | "fixture_pair_object_pool"
+    eval_pool_fixture_refs: dict[str, str] | None = None
+    eval_pool_episode_ids: list[int] | None = None
+    eval_pool_object_categories: list[str] | None = None
+    # If True, preserve recorded robot base pose on fresh-placement resets
+    eval_keep_robot_pose: bool = False
+    # Additive uniform noise on robot base pos (xy) and yaw; 0 = exact, e.g. 0.05 = ±5cm/±0.05rad
+    eval_robot_pose_noise: float = 0.0
+    # Additive uniform noise on main object XY position; 0 = exact, e.g. 0.02 = ±2cm
+    eval_object_pose_noise: float = 0.0
+    # Additive uniform noise on main object yaw (radians); 0 = exact
+    eval_object_ori_noise: float = 0.0
+
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         repack_transform = _transforms.Group()
@@ -507,14 +526,21 @@ class LeRobotRobocasaDataConfig(DataConfigFactory):
 
         # Enrich data_dirs with scene filtering params
         enriched_data_dirs = self.data_dirs
-        if self.data_dirs and (self.layout_and_style_ids is not None or self.num_demos is not None):
+        filter_fields = {
+            "layout_and_style_ids": self.layout_and_style_ids,
+            "num_demos": self.num_demos,
+            "fixture_refs": self.fixture_refs,
+            "object_categories": self.object_categories,
+            "episode_ids": self.episode_ids,
+        }
+        has_any_filter = any(v is not None for v in filter_fields.values())
+        if self.data_dirs and has_any_filter:
             enriched_data_dirs = []
             for d in self.data_dirs:
                 d_copy = dict(d)
-                if self.layout_and_style_ids is not None:
-                    d_copy["layout_and_style_ids"] = self.layout_and_style_ids
-                if self.num_demos is not None:
-                    d_copy["num_demos"] = self.num_demos
+                for key, value in filter_fields.items():
+                    if value is not None:
+                        d_copy[key] = value
                 enriched_data_dirs.append(d_copy)
 
         # Fallback: if norm_stats not found via assets/repo meta, combine from all data_dirs
@@ -1153,7 +1179,15 @@ _CONFIGS = [
                 "filter_key": None,
             }],
             layout_and_style_ids=[(1, 1)],
-            num_demos=40,
+            num_demos=5,
+            # Eval: exact_state_replay from ep 32 (hot_dog, cab_3, 50% SR with noise)
+            # with ±2.5cm object/robot XY noise and ±0.5rad object yaw noise
+            eval_init_mode="exact_state_replay",
+            eval_pool_episode_ids=[32],
+            eval_keep_robot_pose=True,
+            eval_robot_pose_noise=0.025,
+            eval_object_pose_noise=0.025,
+            eval_object_ori_noise=0.5,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         checkpoint_base_dir="/data/hf_cache/pi-models/pi05_robocasa_single_task/",
