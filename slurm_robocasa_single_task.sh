@@ -7,8 +7,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --partition=general
 #SBATCH --qos=normal
-#SBATCH --constraint=L40S
-#SBATCH --exclude=babel-p5-28
+#SBATCH --exclude=babel-p5-28,babel-p5-20,babel-o5-24
 #SBATCH --output=/data/user_data/sreyasv/robocasa_logs/logs/pi05_single_task_%j.out
 #SBATCH --error=/data/user_data/sreyasv/robocasa_logs/logs/pi05_single_task_%j.err
 
@@ -33,8 +32,15 @@ source /home/sreyasv/miniconda3/etc/profile.d/conda.sh
 conda activate dsrl_pi0
 echo "Starting single-task training: PickPlaceCounterToCabinet, layout=1 style=1, num_demos=${NUM_DEMOS}"
 
-python scripts/train.py pi05_robocasa_single_task_lora \
-    --exp-name=pi05_pickplace_cab_L1S1_${NUM_DEMOS}demos \
+# python scripts/train.py pi05_robocasa_single_task_lora \
+#     --exp-name=pi05_pickplace_cab_L1S1_${NUM_DEMOS}demos \
+#     --batch-size 32 \
+#     --data.num-demos ${NUM_DEMOS} \
+#     --overwrite
+    
+python scripts/train.py pi05_robocasa_single_task_lora_sink_to_counter \
+    --exp-name=pi05_pickplace_sink_to_counter_${NUM_DEMOS}demos \
     --batch-size 32 \
     --data.num-demos ${NUM_DEMOS} \
+    --num-workers 0 \
     --overwrite

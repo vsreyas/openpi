@@ -1180,10 +1180,173 @@ _CONFIGS = [
             }],
             layout_and_style_ids=[(1, 1)],
             num_demos=5,
-            # Eval: exact_state_replay from ep 32 (hot_dog, cab_3, 50% SR with noise)
-            # with ±2.5cm object/robot XY noise and ±0.5rad object yaw noise
+            # Eval: same fixture pair from ep 32 (cab_3, counter_right),
+            # different instance of same object category each reset
+            eval_init_mode="fixture_pair_same_category",
+            eval_pool_episode_ids=[32],
+            eval_keep_robot_pose=True,
+            eval_robot_pose_noise=0.05,
+            eval_object_pose_noise=0.05,
+            eval_object_ori_noise=0.5,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        checkpoint_base_dir="/data/hf_cache/pi-models/pi05_robocasa_single_task/",
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=100_000,
+        batch_size=32,
+        save_interval=2_000,
+        num_workers=4,
+        log_interval=100,
+    ),
+    TrainConfig(
+        name="pi05_robocasa_single_task_lora_pick_place_stove",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            paligemma_variant="gemma_2b_lora",
+        ),
+        data=LeRobotRobocasaDataConfig(
+            assets=AssetsConfig(
+                assets_dir="/data/user_data/sreyasv/Repos/batch_value_learning/assets/pi05_robocasa_rlds_comp_set",
+                asset_id="robocasa",
+            ),
+            data_dirs=[{
+                "path": "data/group_data/maxlab/common_datasets/sreyasv/robocasa/v1.0/pretrain/atomic/PickPlaceStoveToCounter/20250819/lerobot",
+                "filter_key": None,
+            }],
+            layout_and_style_ids=[(1, 1)],
+            num_demos=5,
+            # Eval: same fixture pair from ep 32 (cab_3, counter_right),
+            # different instance of same object category each reset
+            eval_init_mode="fixture_pair_same_category",
+            eval_pool_episode_ids=[32],
+            eval_keep_robot_pose=True,
+            eval_robot_pose_noise=0.025,
+            eval_object_pose_noise=0.025,
+            eval_object_ori_noise=0.5,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        checkpoint_base_dir="/data/hf_cache/pi-models/pi05_robocasa_single_task/",
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=100_000,
+        batch_size=32,
+        save_interval=2_000,
+        num_workers=4,
+        log_interval=100,
+    ),
+    TrainConfig(
+        name="pi05_robocasa_single_task_lora_exact_replay",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            paligemma_variant="gemma_2b_lora",
+        ),
+        data=LeRobotRobocasaDataConfig(
+            assets=AssetsConfig(
+                assets_dir="/data/user_data/sreyasv/Repos/batch_value_learning/assets/pi05_robocasa_rlds_comp_set",
+                asset_id="robocasa",
+            ),
+            data_dirs=[{
+                "path": "/data/hf_cache/datasets/robocasa/v1.0/target/atomic/PickPlaceCounterToCabinet/20250811/lerobot",
+                "filter_key": None,
+            }],
+            layout_and_style_ids=[(1, 1)],
+            num_demos=1,
+            # Eval: same fixture pair from ep 32 (cab_3, counter_right),
+            # different instance of same object category each reset
             eval_init_mode="exact_state_replay",
             eval_pool_episode_ids=[32],
+            eval_keep_robot_pose=True,
+            eval_robot_pose_noise=0.1,
+            eval_object_pose_noise=0.1,
+            eval_object_ori_noise=0.5,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        checkpoint_base_dir="/data/hf_cache/pi-models/pi05_robocasa_single_task/",
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=100_000,
+        batch_size=32,
+        save_interval=2_000,
+        num_workers=4,
+        log_interval=100,
+    ),
+    # =========================================================================
+    # PickPlaceSinkToCounter — banana, layout=5, style=5
+    #
+    # Dataset: /data/group_data/maxlab/common_datasets/sreyasv/robocasa/v1.0/
+    #          target/atomic/PickPlaceSinkToCounter/20250813/lerobot
+    # Total episodes: 501 across 10 (layout, style) pairs
+    # Selected scene: (5, 5) — 67 episodes, all sharing fixture pair:
+    #   sink: sink_left_group, counter: counter_left_group
+    # Selected object: banana — 7 episodes total, using first 5:
+    #   ep 66, 138, 199, 200, 324
+    # Eval: fixture_pair_same_category — different banana instance each reset,
+    #   RoboCasa-resampled placement, robot pose kept + ±2.5cm noise
+    # fixture_refs={"sink": "sink_left_group", "counter": "counter_left_group"},
+    #         object_categories=["banana"],
+    # =========================================================================
+    TrainConfig(
+        name="pi05_robocasa_single_task_lora_sink_to_counter",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            paligemma_variant="gemma_2b_lora",
+        ),
+        data=LeRobotRobocasaDataConfig(
+            assets=AssetsConfig(
+                assets_dir="/data/user_data/sreyasv/Repos/batch_value_learning/assets/pi05_robocasa_rlds_comp_set",
+                asset_id="robocasa",
+            ),
+            data_dirs=[{
+                "path": "/data/group_data/maxlab/common_datasets/sreyasv/robocasa/v1.0/target/atomic/PickPlaceSinkToCounter/20250813/lerobot",
+                "filter_key": None,
+            }],
+            layout_and_style_ids=[(5, 5)],
+            episode_ids=[66, 138, 199, 200, 324],
+            num_demos=5,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/hf_cache/pi-models/openpi/openpi-assets/checkpoints/pi05_base/params"),
+        checkpoint_base_dir="/data/hf_cache/pi-models/pi05_robocasa_single_task/",
+        freeze_filter=pi0_config.Pi0Config(
+            paligemma_variant="gemma_2b_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        num_train_steps=100_000,
+        batch_size=32,
+        save_interval=2_000,
+        num_workers=4,
+        log_interval=100,
+    ),
+    TrainConfig(
+        name="pi05_robocasa_single_task_lora_sink_to_counter_eval",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            paligemma_variant="gemma_2b_lora",
+        ),
+        data=LeRobotRobocasaDataConfig(
+            assets=AssetsConfig(
+                assets_dir="/data/user_data/sreyasv/Repos/batch_value_learning/assets/pi05_robocasa_rlds_comp_set",
+                asset_id="robocasa",
+            ),
+            data_dirs=[{
+                "path": "/data/group_data/maxlab/common_datasets/sreyasv/robocasa/v1.0/target/atomic/PickPlaceSinkToCounter/20250813/lerobot",
+                "filter_key": None,
+            }],
+            layout_and_style_ids=[(5, 5)],
+            episode_ids=[66, 138, 199, 200, 324],
+            num_demos=5,
+            eval_init_mode="fixture_pair_same_category",
+            eval_pool_episode_ids=[66, 138, 199, 200, 324],
             eval_keep_robot_pose=True,
             eval_robot_pose_noise=0.025,
             eval_object_pose_noise=0.025,
