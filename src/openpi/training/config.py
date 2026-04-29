@@ -32,10 +32,13 @@ import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
 import openpi.transforms as _transforms
 import numpy as np
+try:
+    import openpi.groot_utils.groot_openpi_dataset as _groot_openpi_dataset
+    from robocasa.macros import DATASET_BASE_PATH
+    from robocasa.utils.dataset_registry import DATASET_SOUP_REGISTRY
+except:
+    logging.warning("Could not import groot_openpi_dataset. Groot datasets will not be available.")
 
-import openpi.groot_utils.groot_openpi_dataset as _groot_openpi_dataset
-from robocasa.macros import DATASET_BASE_PATH
-from robocasa.utils.dataset_registry import DATASET_SOUP_REGISTRY
 
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
@@ -1093,7 +1096,7 @@ _CONFIGS = [
         ),
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_libero/params"), # gs://openpi-assets/checkpoints/pi05_base/params /data/hf_cache/models/ep5_chkpt/params
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"), # gs://openpi-assets/checkpoints/pi05_base/params /data/hf_cache/models/ep5_chkpt/params
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
         num_train_steps=30_000,
     ),

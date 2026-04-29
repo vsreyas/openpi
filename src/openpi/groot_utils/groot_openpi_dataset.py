@@ -16,15 +16,18 @@ import openpi.models.model as _model
 import openpi.training.config as _config
 import openpi.transforms as _transforms
 import openpi.shared.normalize as _normalize
-
+import logging
 import pathlib
 from pathlib import Path
 
 T_co = TypeVar("T_co", covariant=True)
-
-from robocasa.utils.groot_utils.groot_dataset import LeRobotSingleDataset, LeRobotMixtureDataset, LE_ROBOT_MODALITY_FILENAME, ModalityConfig, LE_ROBOT_EPISODE_FILENAME
-from robocasa.utils.groot_utils.embodiment_tags import EmbodimentTag
-
+try:
+    from robocasa.utils.groot_utils.groot_dataset import LeRobotSingleDataset, LeRobotMixtureDataset, LE_ROBOT_MODALITY_FILENAME, ModalityConfig, LE_ROBOT_EPISODE_FILENAME
+    from robocasa.utils.groot_utils.embodiment_tags import EmbodimentTag
+except ImportError:
+    logging.warning(
+        "Could not import groot dataset classes. Please ensure you have access to the groot dataset and that the robocasa package is installed."
+    )
 
 def _fixture_refs_match(ep_refs: dict, requested: dict) -> bool:
     """Check that every (key, value) in requested matches the episode's fixture_refs."""
