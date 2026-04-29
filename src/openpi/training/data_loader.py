@@ -8,7 +8,10 @@ from typing import Literal, Protocol, SupportsIndex, TypeVar
 import jax
 import jax.numpy as jnp
 # import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
-import openpi.groot_utils.groot_openpi_dataset as _groot_openpi_dataset
+try:
+    import openpi.groot_utils.groot_openpi_dataset as _groot_openpi_dataset
+except:
+    logging.warning("Could not import groot_openpi_dataset. Groot datasets will not be available.")
 import numpy as np
 import torch
 
