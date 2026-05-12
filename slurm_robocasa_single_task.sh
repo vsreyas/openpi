@@ -23,7 +23,7 @@
 
 NUM_DEMOS=${NUM_DEMOS:-5}
 
-export OPENPI_DATA_HOME=/data/hf_cache/pi-models/openpi
+export OPENPI_DATA_HOME=/data/group_data/rl/sreyasv/base_dump
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
 export PYTHONUNBUFFERED=1
 

@@ -16,7 +16,7 @@ import tqdm_loggable.auto as tqdm
 
 # Environment variable to control cache directory path, ~/.cache/openpi will be used by default.
 _OPENPI_DATA_HOME = "OPENPI_DATA_HOME"
-DEFAULT_CACHE_DIR = "/data/hf_cache/pi-models/openpi"
+DEFAULT_CACHE_DIR = "/data/group_data/rl/sreyasv/base_dump"
 
 logger = logging.getLogger(__name__)
 
