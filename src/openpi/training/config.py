@@ -2067,6 +2067,73 @@ _CONFIGS = [
         keep_period=5_000,
     ),
     TrainConfig(
+        name="pi05_yam_arrange_all_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=60,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=SimpleDataConfig(
+            repo_id="local/yam_combined",
+            assets=AssetsConfig(
+                assets_dir="./assets/pi05_yam_combined_lora",
+                asset_id="local/yam_combined",
+            ),
+            data_transforms=lambda model: _transforms.Group(
+                inputs=[
+                    _yam_policy.YamInputs(),
+                    _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                    _yam_policy.YamOutputs(),
+                ],
+            ),
+            model_transforms=ModelTransformFactory(
+                default_prompt="place the knife and the donut on the plate",
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+                dataset_filter_prompt="place the knife and the donut on the plate",
+                repack_transforms=_transforms.Group(
+                    inputs=[
+                        _transforms.RepackTransform(
+                            {
+                                "images": {
+                                    "top": "observation.images.top",
+                                    "left_wrist": "observation.images.left_wrist",
+                                    "right_wrist": "observation.images.right_wrist",
+                                },
+                                "state": "observation.state",
+                                "actions": "action",
+                                "prompt": "prompt",
+                            }
+                        )
+                    ]
+                ),
+                action_sequence_keys=("action",),
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        ema_decay=None,
+        num_train_steps=20_000,
+        log_interval=1,
+        save_interval=5_000,
+        keep_period=5_000,
+    ),
+    TrainConfig(
         name="pi05_yam_subtask_lora",
         model=pi0_config.Pi0Config(
             pi05=True,
