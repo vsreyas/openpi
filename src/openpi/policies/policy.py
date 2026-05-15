@@ -68,7 +68,14 @@ class Policy(BasePolicy):
             self._rng = rng or jax.random.key(0)
 
     @override
-    def infer(self, obs: dict, *, noise: np.ndarray | None = None, return_vlm_embedding: bool = False) -> dict:  # type: ignore[misc]
+    def infer(
+        self,
+        obs: dict,
+        *,
+        noise: np.ndarray | None = None,
+        return_vlm_embedding: bool = False,
+        return_normalized: bool = False,
+    ) -> dict:  # type: ignore[misc]
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
         inputs = self._input_transform(inputs)
@@ -127,7 +134,8 @@ class Policy(BasePolicy):
             if batch_size == 1:
                 outputs = jax.tree.map(lambda x: np.asarray(x[0, ...]), outputs)
 
-        outputs = self._output_transform(outputs)
+        if not return_normalized:
+            outputs = self._output_transform(outputs)
         outputs["policy_timing"] = {
             "infer_ms": model_time * 1000,
         }

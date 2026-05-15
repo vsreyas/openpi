@@ -23,6 +23,7 @@ import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.policies.robocasa_policy as robocasa_policy
+import openpi.policies.yam_policy as _yam_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
 import openpi.training.droid_rlds_dataset as droid_rlds_dataset
@@ -110,10 +111,19 @@ class DataConfig:
 
     # Action dimension for padding (used by Groot datasets)
     action_dim: int | None = None
-    
+
     # Multi-dataset support for Groot datasets
     data_dirs: list[str] | None = None  # List of data directories for multi-dataset
     dataset_weights: list[float] | None = None  # Weights for each dataset in multi-dataset
+
+    # Episode-level filters for a single LeRobot dataset (used by the YAM
+    # combined dataset to derive per-task / per-trajectory subsets without
+    # duplicating video data). Filtering happens whole-episode so
+    # delta-timestamps action chunking remains valid.
+    dataset_filter_prompt: str | None = None
+    dataset_filter_orig_traj_id_6_eq: int | None = None
+    dataset_filter_orig_traj_id_6_min: int | None = None
+    dataset_filter_orig_traj_id_6_max: int | None = None
 
 
 class GroupFactory(Protocol):
@@ -1122,6 +1132,69 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
     TrainConfig(
+        name="pi05_libero_finetuned_bbd_fulldata",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/group_data/maxlab/common_datasets/pi05_common/pi05_checkpoints_libero10/pi05_libero10_black_bowl_bottom_drawer_full_data_hdf5_libero10_16000/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_libero_finetuned_mokapots_fulldata",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/group_data/maxlab/common_datasets/pi05_common/pi05_checkpoints_libero10/pi05_libero10_both_mokapots_stove_full_data_hdf5_libero10_16000/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_libero_finetuned_ast_fulldata",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotLiberoDataConfig(
+            repo_id="physical-intelligence/libero",
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=False,
+        ),
+        batch_size=256,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/group_data/maxlab/common_datasets/pi05_common/pi05_checkpoints_libero10/pi05_libero10_alphabet_soup_tomato_sauce_basket_full_data_hdf5_libero10_16000/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
         # Change the name to reflect your model and dataset.
         name="pi0_libero_finetuned",
         # Here you define the model config -- In this example we use pi0 as the model
@@ -1651,6 +1724,409 @@ _CONFIGS = [
         keep_period=1000,
         num_workers=4,
         log_interval=100,
+    ),
+    #
+    # Fine-tuning YAM configs.
+    #
+    TrainConfig(
+        name="pi05_yam_simpletest_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=60,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=SimpleDataConfig(
+            repo_id="local/yam_simpletest",
+            data_transforms=lambda model: _transforms.Group(
+                inputs=[
+                    _yam_policy.YamInputs(),
+                    _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                    _yam_policy.YamOutputs(),
+                ],
+            ),
+            model_transforms=ModelTransformFactory(
+                default_prompt="pick up the lego block and place into the box",
+            ),
+            base_config=DataConfig(
+                repack_transforms=_transforms.Group(
+                    inputs=[
+                        _transforms.RepackTransform(
+                            {
+                                "images": {
+                                    "top": "observation.images.top",
+                                    "left_wrist": "observation.images.left_wrist",
+                                    "right_wrist": "observation.images.right_wrist",
+                                },
+                                "state": "observation.state",
+                                "actions": "action",
+                            }
+                        )
+                    ]
+                ),
+                action_sequence_keys=("action",),
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        ema_decay=None,
+        num_train_steps=10_000,
+        log_interval=1,
+        save_interval=5_000,
+        keep_period=5_000,
+    ),
+    #
+    # YAM combined-dataset configs. All three point at the same LeRobot dataset
+    # (local/yam_combined: pick-place + arrange-corn-knife + wipe-the-tray);
+    # filtered variants narrow it down by per-episode task prompt and the
+    # per-frame `orig_traj_id_6` int64 column (= last 6 digits of the original
+    # episode directory name). Norm stats are computed once on the unfiltered
+    # combined config and reused by the filtered variants via AssetsConfig.
+    #
+    TrainConfig(
+        name="pi05_yam_combined_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=60,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=SimpleDataConfig(
+            repo_id="local/yam_combined",
+            data_transforms=lambda model: _transforms.Group(
+                inputs=[
+                    _yam_policy.YamInputs(),
+                    _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                    _yam_policy.YamOutputs(),
+                ],
+            ),
+            model_transforms=ModelTransformFactory(
+                default_prompt="perform the task",
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+                repack_transforms=_transforms.Group(
+                    inputs=[
+                        _transforms.RepackTransform(
+                            {
+                                "images": {
+                                    "top": "observation.images.top",
+                                    "left_wrist": "observation.images.left_wrist",
+                                    "right_wrist": "observation.images.right_wrist",
+                                },
+                                "state": "observation.state",
+                                "actions": "action",
+                                "prompt": "prompt",
+                            }
+                        )
+                    ]
+                ),
+                action_sequence_keys=("action",),
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        ema_decay=None,
+        num_train_steps=20_000,
+        log_interval=1,
+        save_interval=5_000,
+        keep_period=5_000,
+    ),
+    TrainConfig(
+        name="pi05_yam_pickplace_a_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=60,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=SimpleDataConfig(
+            repo_id="local/yam_combined",
+            assets=AssetsConfig(
+                assets_dir="./assets/pi05_yam_combined_lora",
+                asset_id="local/yam_combined",
+            ),
+            data_transforms=lambda model: _transforms.Group(
+                inputs=[
+                    _yam_policy.YamInputs(),
+                    _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                    _yam_policy.YamOutputs(),
+                ],
+            ),
+            model_transforms=ModelTransformFactory(
+                default_prompt="put the green block in the right bin and the blue block in the left bin",
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+                dataset_filter_prompt=(
+                    "put the green block in the right bin and the blue block in the left bin"
+                ),
+                dataset_filter_orig_traj_id_6_eq=14512,
+                repack_transforms=_transforms.Group(
+                    inputs=[
+                        _transforms.RepackTransform(
+                            {
+                                "images": {
+                                    "top": "observation.images.top",
+                                    "left_wrist": "observation.images.left_wrist",
+                                    "right_wrist": "observation.images.right_wrist",
+                                },
+                                "state": "observation.state",
+                                "actions": "action",
+                                "prompt": "prompt",
+                            }
+                        )
+                    ]
+                ),
+                action_sequence_keys=("action",),
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        ema_decay=None,
+        num_train_steps=20_000,
+        log_interval=1,
+        save_interval=5_000,
+        keep_period=5_000,
+    ),
+    TrainConfig(
+        name="pi05_yam_pickplace_b_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=60,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=SimpleDataConfig(
+            repo_id="local/yam_combined",
+            assets=AssetsConfig(
+                assets_dir="./assets/pi05_yam_combined_lora",
+                asset_id="local/yam_combined",
+            ),
+            data_transforms=lambda model: _transforms.Group(
+                inputs=[
+                    _yam_policy.YamInputs(),
+                    _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                    _yam_policy.YamOutputs(),
+                ],
+            ),
+            model_transforms=ModelTransformFactory(
+                default_prompt="put the green block in the right bin and the blue block in the left bin",
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+                dataset_filter_prompt=(
+                    "put the green block in the right bin and the blue block in the left bin"
+                ),
+                dataset_filter_orig_traj_id_6_min=14512,
+                repack_transforms=_transforms.Group(
+                    inputs=[
+                        _transforms.RepackTransform(
+                            {
+                                "images": {
+                                    "top": "observation.images.top",
+                                    "left_wrist": "observation.images.left_wrist",
+                                    "right_wrist": "observation.images.right_wrist",
+                                },
+                                "state": "observation.state",
+                                "actions": "action",
+                                "prompt": "prompt",
+                            }
+                        )
+                    ]
+                ),
+                action_sequence_keys=("action",),
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        ema_decay=None,
+        num_train_steps=20_000,
+        log_interval=1,
+        save_interval=5_000,
+        keep_period=5_000,
+    ),
+    TrainConfig(
+        name="pi05_yam_arrange_a_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=60,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=SimpleDataConfig(
+            repo_id="local/yam_combined",
+            assets=AssetsConfig(
+                assets_dir="./assets/pi05_yam_combined_lora",
+                asset_id="local/yam_combined",
+            ),
+            data_transforms=lambda model: _transforms.Group(
+                inputs=[
+                    _yam_policy.YamInputs(),
+                    _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                    _yam_policy.YamOutputs(),
+                ],
+            ),
+            model_transforms=ModelTransformFactory(
+                default_prompt="place the knife and the donut on the plate",
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+                dataset_filter_prompt="place the knife and the donut on the plate",
+                dataset_filter_orig_traj_id_6_eq=25632,
+                repack_transforms=_transforms.Group(
+                    inputs=[
+                        _transforms.RepackTransform(
+                            {
+                                "images": {
+                                    "top": "observation.images.top",
+                                    "left_wrist": "observation.images.left_wrist",
+                                    "right_wrist": "observation.images.right_wrist",
+                                },
+                                "state": "observation.state",
+                                "actions": "action",
+                                "prompt": "prompt",
+                            }
+                        )
+                    ]
+                ),
+                action_sequence_keys=("action",),
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        ema_decay=None,
+        num_train_steps=20_000,
+        log_interval=1,
+        save_interval=5_000,
+        keep_period=5_000,
+    ),
+    TrainConfig(
+        name="pi05_yam_subtask_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=60,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=SimpleDataConfig(
+            repo_id="local/yam_subtask",
+            data_transforms=lambda model: _transforms.Group(
+                inputs=[
+                    _yam_policy.YamInputs(),
+                    _transforms.DeltaActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                ],
+                outputs=[
+                    _transforms.AbsoluteActions(_transforms.make_bool_mask(6, -1, 6, -1)),
+                    _yam_policy.YamOutputs(),
+                ],
+            ),
+            model_transforms=ModelTransformFactory(
+                default_prompt="perform the task",
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+                repack_transforms=_transforms.Group(
+                    inputs=[
+                        _transforms.RepackTransform(
+                            {
+                                "images": {
+                                    "top": "observation.images.top",
+                                    "left_wrist": "observation.images.left_wrist",
+                                    "right_wrist": "observation.images.right_wrist",
+                                },
+                                "state": "observation.state",
+                                "actions": "action",
+                                "prompt": "prompt",
+                            }
+                        )
+                    ]
+                ),
+                action_sequence_keys=("action",),
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        ema_decay=None,
+        num_train_steps=10_000,
+        log_interval=1,
+        save_interval=5_000,
+        keep_period=5_000,
     ),
 
 ]

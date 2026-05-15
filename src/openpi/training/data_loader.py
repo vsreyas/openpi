@@ -161,7 +161,7 @@ def create_torch_dataset(
         raise ValueError("Repo ID is not set. Cannot create dataset.")
 
     # Standard (openpi) LeRobot dataset loading
-    import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+    import lerobot.datasets.lerobot_dataset as lerobot_dataset
 
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
     dataset = lerobot_dataset.LeRobotDataset(
@@ -171,10 +171,92 @@ def create_torch_dataset(
         },
     )
 
+    if _has_episode_filter(data_config):
+        dataset = _FilteredLeRobotDataset(dataset, dataset_meta, data_config)
+
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
 
     return dataset
+
+
+def _has_episode_filter(data_config: _config.DataConfig) -> bool:
+    return (
+        data_config.dataset_filter_prompt is not None
+        or data_config.dataset_filter_orig_traj_id_6_eq is not None
+        or data_config.dataset_filter_orig_traj_id_6_min is not None
+        or data_config.dataset_filter_orig_traj_id_6_max is not None
+    )
+
+
+class _FilteredLeRobotDataset:
+    """Whole-episode subset over a LeRobotDataset.
+
+    Filters at the episode boundary, so the underlying delta-timestamps
+    action chunking remains valid for every kept frame. Supports filtering
+    by (a) LeRobot per-episode `task` string equality and (b) a per-frame
+    int64 column `orig_traj_id_6` (constant within an episode) via exact /
+    min / max match.
+    """
+
+    _TRAJ_ID_COLUMN = "orig_traj_id_6"
+
+    def __init__(self, base, meta, data_config: _config.DataConfig):
+        prompt = data_config.dataset_filter_prompt
+        tid_eq = data_config.dataset_filter_orig_traj_id_6_eq
+        tid_min = data_config.dataset_filter_orig_traj_id_6_min
+        tid_max = data_config.dataset_filter_orig_traj_id_6_max
+
+        need_traj_id = (tid_eq is not None) or (tid_min is not None) or (tid_max is not None)
+        if need_traj_id and self._TRAJ_ID_COLUMN not in base.features:
+            raise ValueError(
+                f"Dataset {meta.repo_id!r} has no {self._TRAJ_ID_COLUMN} column; "
+                f"orig_traj_id_6 filters require a dataset built with the combined converter."
+            )
+
+        hf = base.hf_dataset
+        allowed: list[int] = []
+        kept_episode_indices: list[int] = []
+        start = 0
+        for ep in meta.episodes.values() if isinstance(meta.episodes, dict) else meta.episodes:
+            length = int(ep["length"])
+            keep = True
+            if prompt is not None and prompt not in ep["tasks"]:
+                keep = False
+            if keep and need_traj_id:
+                tid = int(hf[start][self._TRAJ_ID_COLUMN])
+                if tid_eq is not None and tid != tid_eq:
+                    keep = False
+                if keep and tid_min is not None and tid < tid_min:
+                    keep = False
+                if keep and tid_max is not None and tid > tid_max:
+                    keep = False
+            if keep:
+                allowed.extend(range(start, start + length))
+                kept_episode_indices.append(int(ep["episode_index"]))
+            start += length
+
+        if not allowed:
+            raise ValueError(
+                f"Episode filter (prompt={prompt!r}, traj_id_eq={tid_eq}, "
+                f"min={tid_min}, max={tid_max}) matched zero frames in {meta.repo_id!r}."
+            )
+
+        logging.info(
+            "Episode filter kept %d/%d episodes (%d/%d frames) in %s",
+            len(kept_episode_indices), len(meta.episodes),
+            len(allowed), start, meta.repo_id,
+        )
+
+        self._base = base
+        self._allowed = allowed
+        self.kept_episode_indices = kept_episode_indices
+
+    def __len__(self) -> int:
+        return len(self._allowed)
+
+    def __getitem__(self, index: SupportsIndex):
+        return self._base[self._allowed[int(index)]]
 
 
 def create_rlds_dataset(
