@@ -1,7 +1,6 @@
 from typing import Dict
 
 import numpy as np
-import tree
 from typing_extensions import override
 
 from openpi_client import base_policy as _base_policy
@@ -29,19 +28,34 @@ class ActionChunkBroker(_base_policy.BasePolicy):
             self._last_results = self._policy.infer(obs, noise=noise)
             self._cur_step = 0
 
-        def slicer(x):
-            if isinstance(x, np.ndarray):
-                return x[self._cur_step, ...]
-            else:
-                return x
-
-        results = tree.map_structure(slicer, self._last_results)
+        results = self._slice_action_chunks(self._last_results)
         self._cur_step += 1
 
         if self._cur_step >= self._action_horizon:
             self._last_results = None
 
         return results
+
+    def _slice_action_chunks(self, value, key_path: tuple[str, ...] = ()):
+        if isinstance(value, dict):
+            return {
+                key: self._slice_action_chunks(child, (*key_path, str(key)))
+                for key, child in value.items()
+            }
+
+        is_action_field = any(
+            key in {"action", "actions"} or key.endswith("_actions")
+            for key in key_path
+        )
+        if is_action_field and isinstance(value, np.ndarray) and value.ndim > 0:
+            if self._cur_step >= value.shape[0]:
+                raise ValueError(
+                    f"Action field {'/'.join(key_path)!r} has chunk length "
+                    f"{value.shape[0]}, shorter than requested step {self._cur_step}."
+                )
+            return value[self._cur_step, ...]
+
+        return value
 
     @override
     def reset(self) -> None:

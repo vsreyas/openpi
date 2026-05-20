@@ -60,8 +60,9 @@ Options:
 1. The client connects to the server via WebSocket and resets the robot to home position.
 2. Each episode runs a closed-loop control cycle at 60Hz:
    - **Client** reads observations from the robot (joint positions + camera images).
-   - **Client** assembles the state vector (14-dim float32), resizes images to 224x224,
-     rearranges to (C,H,W) uint8, and sends to the server.
+   - **Client** assembles the state vector (14-dim float32), converts live BGR
+     camera frames to RGB, direct-resizes images to 224x224 to match the
+     LeRobot converter, rearranges to (C,H,W) uint8, and sends to the server.
    - **Server** runs the full inference pipeline: prompt injection, `YamInputs` (camera name
      remapping), quantile normalization, flow matching denoising, `AbsoluteActions` (delta to
      absolute conversion), `YamOutputs` (truncate to 14 dims).
@@ -91,7 +92,8 @@ YAMBimanualEnv._get_obs()
   |
 YamEnvironment.get_observation()
   - assemble state (14,) float32
-  - resize images to 224x224
+  - convert live BGR frames to RGB
+  - direct-resize images to 224x224
   - transpose to (C,H,W) uint8
   |
 ActionChunkBroker.infer(obs)

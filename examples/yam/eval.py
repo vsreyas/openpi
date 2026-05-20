@@ -26,6 +26,7 @@ from openpi_client.runtime import runtime as _runtime
 from openpi_client.runtime.agents import policy_agent as _policy_agent
 
 import env as _env
+from eval_saver import RolloutSaverSubscriber
 from yam_teleop.env import YAMBimanualEnv
 
 
@@ -39,7 +40,42 @@ def main():
     parser.add_argument("--max-episode-steps", type=int, default=3600, help="Max steps per episode (default: 3600 = 60s at 60Hz)")
     parser.add_argument("--prompt", default=None, help="Override server's default prompt")
     parser.add_argument("--no-reset", action="store_true", help="Do not send the robot home at episode start/end (for continuous prompting)")
+    parser.add_argument(
+        "--init-traj-glob",
+        action="append",
+        default=None,
+        help=(
+            "Glob (repeatable, ** supported) matching training-trajectory episode.hdf5 files. "
+            "On each reset, one match is picked at random and the robot is driven to its "
+            "`--init-timestep` state after homing."
+        ),
+    )
+    parser.add_argument("--init-timestep", type=int, default=200, help="Timestep within the picked trajectory to use as the reset target (default: 200)")
+    parser.add_argument("--init-seed", type=int, default=None, help="RNG seed for selecting which training trajectory to init from")
+    parser.add_argument(
+        "--init-traj-id-min",
+        type=int,
+        default=None,
+        help=(
+            "Lower bound (inclusive) on the trajectory id (last `_`-separated int "
+            "in the episode dir name = orig_traj_id_6). Used to narrow --init-traj-glob "
+            "to the same training subset the policy was trained on (mirrors "
+            "dataset_filter_orig_traj_id_6_min)."
+        ),
+    )
+    parser.add_argument(
+        "--init-traj-id-max",
+        type=int,
+        default=None,
+        help="Upper bound (inclusive) on the trajectory id; mirrors dataset_filter_orig_traj_id_6_max.",
+    )
+    parser.add_argument("--save-rollouts", action="store_true", help="Save each rollout (HDF5 + per-camera videos) to --save-dir")
+    parser.add_argument("--save-dir", default=None, help="Directory for saved rollouts; required when --save-rollouts is set")
+    parser.add_argument("--save-run-tag", default="rollout", help="Prefix for each saved episode directory (default: rollout)")
     args = parser.parse_args()
+
+    if args.save_rollouts and not args.save_dir:
+        parser.error("--save-dir is required when --save-rollouts is set")
 
     ws_policy = _websocket_client_policy.WebsocketClientPolicy(
         host=args.host,
@@ -49,15 +85,34 @@ def main():
 
     yam_env = YAMBimanualEnv(args.env_config)
 
+    subscribers = []
+    if args.save_rollouts:
+        subscribers.append(
+            RolloutSaverSubscriber(
+                output_dir=args.save_dir,
+                run_tag=args.save_run_tag,
+                prompt=args.prompt,
+            )
+        )
+
     runtime = _runtime.Runtime(
-        environment=_env.YamEnvironment(yam_env, prompt=args.prompt, no_reset=args.no_reset),
+        environment=_env.YamEnvironment(
+            yam_env,
+            prompt=args.prompt,
+            no_reset=args.no_reset,
+            init_traj_globs=args.init_traj_glob,
+            init_timestep=args.init_timestep,
+            init_seed=args.init_seed,
+            init_traj_id_min=args.init_traj_id_min,
+            init_traj_id_max=args.init_traj_id_max,
+        ),
         agent=_policy_agent.PolicyAgent(
             policy=action_chunk_broker.ActionChunkBroker(
                 policy=ws_policy,
                 action_horizon=args.action_horizon,
             )
         ),
-        subscribers=[],
+        subscribers=subscribers,
         max_hz=60,
         num_episodes=args.num_episodes,
         max_episode_steps=args.max_episode_steps,
