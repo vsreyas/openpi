@@ -13,6 +13,7 @@ Client (Terminal 2, gello conda env):
 """
 
 import argparse
+import math
 import logging
 import sys
 from pathlib import Path
@@ -23,11 +24,78 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from openpi_client import action_chunk_broker
 from openpi_client import websocket_client_policy as _websocket_client_policy
 from openpi_client.runtime import runtime as _runtime
+from openpi_client.runtime import subscriber as _subscriber
 from openpi_client.runtime.agents import policy_agent as _policy_agent
 
 import env as _env
 from eval_saver import RolloutSaverSubscriber
 from yam_teleop.env import YAMBimanualEnv
+
+
+class SafetyDebugSubscriber(_subscriber.Subscriber):
+    """Print robot-node safety diagnostics during policy rollout."""
+
+    def __init__(self, every_steps: int = 30) -> None:
+        self._every_steps = max(int(every_steps), 1)
+        self._step = 0
+
+    def on_episode_start(self) -> None:
+        self._step = 0
+        logging.info("SafetyDebug: printing every %d step(s)", self._every_steps)
+
+    @staticmethod
+    def _fmt_float(value) -> str:
+        try:
+            x = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        if not math.isfinite(x):
+            return "n/a"
+        return f"{x:.3f}"
+
+    @staticmethod
+    def _max_abs(values) -> str:
+        if values is None:
+            return "n/a"
+        try:
+            arr = [abs(float(v)) for v in values]
+        except (TypeError, ValueError):
+            return "n/a"
+        return f"{max(arr):.3f}" if arr else "n/a"
+
+    def on_step(self, observation: dict, action: dict) -> None:
+        self._step += 1
+        if self._step % self._every_steps != 0:
+            return
+
+        safety = observation.get("safety") or {}
+        if not safety:
+            logging.info(
+                "SafetyDebug step=%d: no safety diagnostics in observation "
+                "(is robot_node safety.enabled true?)",
+                self._step,
+            )
+            return
+
+        parts = []
+        for side in ("left", "right"):
+            diag = safety.get(side)
+            if not diag:
+                parts.append(f"{side}: no_diag")
+                continue
+            active = diag.get("active_constraints") or []
+            warnings = diag.get("warnings") or []
+            parts.append(
+                f"{side}: active={active or '-'} warnings={warnings or '-'} "
+                f"qerr={self._max_abs(diag.get('q_error'))} "
+                f"self={self._fmt_float(diag.get('min_self_distance'))} "
+                f"inter={self._fmt_float(diag.get('min_interarm_distance'))} "
+                f"world={self._fmt_float(diag.get('min_world_distance'))}"
+            )
+        logging.info("SafetyDebug step=%d | %s", self._step, " | ".join(parts))
+
+    def on_episode_end(self) -> None:
+        pass
 
 
 def main():
@@ -72,6 +140,12 @@ def main():
     parser.add_argument("--save-rollouts", action="store_true", help="Save each rollout (HDF5 + per-camera videos) to --save-dir")
     parser.add_argument("--save-dir", default=None, help="Directory for saved rollouts; required when --save-rollouts is set")
     parser.add_argument("--save-run-tag", default="rollout", help="Prefix for each saved episode directory (default: rollout)")
+    parser.add_argument(
+        "--safety-debug-every",
+        type=int,
+        default=0,
+        help="Print robot-node safety diagnostics every N rollout steps; 0 disables.",
+    )
     args = parser.parse_args()
 
     if args.save_rollouts and not args.save_dir:
@@ -86,6 +160,8 @@ def main():
     yam_env = YAMBimanualEnv(args.env_config)
 
     subscribers = []
+    if args.safety_debug_every > 0:
+        subscribers.append(SafetyDebugSubscriber(every_steps=args.safety_debug_every))
     if args.save_rollouts:
         subscribers.append(
             RolloutSaverSubscriber(

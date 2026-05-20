@@ -231,6 +231,13 @@ class YamEnvironment(_environment.Environment):
             images[cam] = np.transpose(img, (2, 0, 1))  # HWC -> CHW
 
         out = {"state": state, "images": images}
+        safety = {
+            side: obs["robot"].get(f"{side}/safety")
+            for side in ("left", "right")
+            if obs["robot"].get(f"{side}/safety") is not None
+        }
+        if safety:
+            out["safety"] = safety
         if self._prompt is not None:
             out["prompt"] = self._prompt
         return out
